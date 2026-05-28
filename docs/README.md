@@ -109,3 +109,13 @@ Requires Python 3.13 and [uv](https://docs.astral.sh/uv/).
 **To Andrea:** Thank you for building this and keeping it open. We inherit from your work with respect, and we keep it open the same way you did.
 
 Original project: [github.com/andreavolpato/spektrafilm](https://github.com/andreavolpato/spektrafilm) — please star it there too.
+
+---
+
+## Credits
+
+**Physics engine & film profiles:** [@andreavolpato](https://github.com/andreavolpato) — the entire simulation core, all film and paper profiles, and the spectral modeling framework are his original work. This repository would not exist without it.
+
+**Chinese GUI:** Ma Zhi — interface redesign, Chinese localization, photographer workflow optimization.
+
+GitHub Contributors only reflects who committed to this fork. The intellectual authorship of the underlying science belongs to Andrea Volpato.
