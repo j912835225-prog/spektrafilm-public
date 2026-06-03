@@ -20,6 +20,7 @@ from spektrafilm_gui.persistence import (
     clear_saved_default_gui_state,
     load_dialog_dir,
     load_gui_state_from_path,
+    presets_dir,
     save_default_gui_state,
     save_dialog_dir,
     save_gui_state_to_path,
@@ -29,7 +30,7 @@ from spektrafilm_gui.napari_layout import dialog_parent, reset_viewer_camera, se
 from spektrafilm_gui.params_mapper import build_params_from_state
 from spektrafilm_gui.state_bridge import apply_gui_state, collect_gui_state
 from spektrafilm_gui.widgets import WidgetBundle
-from spektrafilm_gui.file_formats import RAW_EXTS, SUPPORTED_EXTS
+from spektrafilm_gui.file_formats import RAW_EXTS
 
 OUTPUT_FLOAT_DATA_KEY = 'pipeline_float_output'
 OUTPUT_COLOR_SPACE_KEY = 'pipeline_output_color_space'
@@ -308,12 +309,12 @@ class GuiController:
     def _run_preview(self, *, report_status: bool) -> None:
         self._start_simulation(
             source_layer_name=INPUT_PREVIEW_LAYER_NAME,
-            mode_label='预览',
+            mode_label='Preview',
             report_status=report_status,
         )
 
     def run_scan(self) -> None:
-        self._start_simulation(source_layer_name=INPUT_LAYER_NAME, mode_label='扫描')
+        self._start_simulation(source_layer_name=INPUT_LAYER_NAME, mode_label='Scan')
 
     def request_auto_preview(self, *_args) -> None:
         if self._auto_preview_scheduled:
@@ -351,7 +352,7 @@ class GuiController:
             self._pending_auto_preview = True
             return
         set_status(self._viewer, '正在扫描，图像越大耗时越长，请稍候...', timeout_ms=0)
-        self._start_simulation(source_layer_name=INPUT_LAYER_NAME, mode_label='扫描', report_status=False)
+        self._start_simulation(source_layer_name=INPUT_LAYER_NAME, mode_label='Scan', report_status=False)
 
     def request_raw_reprocess(self, *_args) -> None:
         """RAW 参数改变时，debounce 800ms 后自动重新处理 RAW。"""
@@ -560,152 +561,6 @@ class GuiController:
         else:
             set_status(self._viewer, f"已保存到 {filepath}")
 
-    def batch_save(self) -> None:
-        """批量处理：选择文件夹，用当前参数处理所有图片并保存到同一目录。"""
-        from qtpy import QtWidgets as _QW
-        import os as _os
-
-        # 选择输入文件夹
-        input_dir = _QW.QFileDialog.getExistingDirectory(
-            dialog_parent(self._viewer),
-            '选择要批量处理的图片文件夹',
-            _os.path.expanduser('~/Desktop'),
-        )
-        if not input_dir:
-            return
-
-        files = sorted([
-            f for f in _os.listdir(input_dir)
-            if _os.path.splitext(f)[1].lstrip('.').lower() in SUPPORTED_EXTS
-        ])
-        if not files:
-            QMessageBox.warning(dialog_parent(self._viewer), '批量保存', '文件夹内没有支持的图片文件。')
-            return
-
-        # 选择输出格式
-        fmt_dialog = _QW.QDialog(dialog_parent(self._viewer))
-        fmt_dialog.setWindowTitle('批量保存选项')
-        fmt_dialog.setFixedWidth(320)
-        layout = _QW.QFormLayout(fmt_dialog)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(10)
-
-        fmt_combo = _QW.QComboBox()
-        fmt_combo.addItems(['JPEG (.jpg)', 'PNG (.png)', 'TIFF 16bit (.tif)', 'TIFF 32bit float (.tif)'])
-        layout.addRow('输出格式', fmt_combo)
-
-        quality_spin = _QW.QSpinBox()
-        quality_spin.setRange(1, 100)
-        quality_spin.setValue(95)
-        quality_spin.setSuffix('%')
-        quality_label = _QW.QLabel('JPEG 质量')
-        layout.addRow(quality_label, quality_spin)
-
-        suffix_edit = _QW.QLineEdit('_spektrafilm')
-        layout.addRow('文件名后缀', suffix_edit)
-
-        def on_fmt(idx):
-            quality_label.setVisible(idx == 0)
-            quality_spin.setVisible(idx == 0)
-        fmt_combo.currentIndexChanged.connect(on_fmt)
-
-        btn_box = _QW.QDialogButtonBox(_QW.QDialogButtonBox.Ok | _QW.QDialogButtonBox.Cancel)
-        btn_box.accepted.connect(fmt_dialog.accept)
-        btn_box.rejected.connect(fmt_dialog.reject)
-        layout.addRow(btn_box)
-
-        if fmt_dialog.exec_() != _QW.QDialog.Accepted:
-            return
-
-        fmt_idx = fmt_combo.currentIndex()
-        fmt_map = {0: ('jpg', 8), 1: ('png', 8), 2: ('tif', 16), 3: ('tif', 32)}
-        ext, bit_depth = fmt_map[fmt_idx]
-        jpeg_quality = quality_spin.value() if fmt_idx == 0 else 95
-        suffix = suffix_edit.text().strip()
-
-        # 构建参数（一次，复用 Simulator）
-        gui_state = collect_gui_state(widgets=self._widgets)
-        try:
-            params = build_params_from_state(gui_state)
-            from spektrafilm.runtime.params_builder import digest_params as _digest
-            from spektrafilm.runtime.process import Simulator as _Sim
-            digested = _digest(params)
-            sim = _Sim(digested)
-        except Exception as exc:
-            QMessageBox.critical(dialog_parent(self._viewer), '批量保存', f'初始化模拟器失败。\n\n{exc}')
-            return
-
-        # 进度对话框
-        progress = _QW.QProgressDialog('正在批量处理...', '取消', 0, len(files), dialog_parent(self._viewer))
-        progress.setWindowTitle('批量保存')
-        progress.setMinimumDuration(0)
-        progress.setValue(0)
-
-        errors = []
-        for i, filename in enumerate(files):
-            if progress.wasCanceled():
-                break
-            progress.setLabelText(f'处理中 ({i+1}/{len(files)})：{filename}')
-            progress.setValue(i)
-            _QW.QApplication.processEvents()
-
-            filepath = _os.path.join(input_dir, filename)
-            stem = _os.path.splitext(filename)[0]
-            out_name = f"{stem}{suffix}.{ext}"
-            out_path = _os.path.join(input_dir, out_name)
-
-            try:
-                file_ext = _os.path.splitext(filename)[1].lstrip('.').lower()
-                if file_ext in RAW_EXTS:
-                    image = load_and_process_raw_file(
-                        filepath,
-                        white_balance=gui_state.load_raw.white_balance,
-                        temperature=gui_state.load_raw.temperature,
-                        tint=gui_state.load_raw.tint,
-                        lens_correction=gui_state.load_raw.lens_correction,
-                        output_colorspace=gui_state.input_image.input_color_space,
-                        output_cctf_encoding=gui_state.input_image.apply_cctf_decoding,
-                    )
-                else:
-                    image = load_image_oiio(filepath)[..., :3]
-
-                result = sim.process(np.asarray(image, dtype=np.float64)[..., :3])
-
-                # pipeline 输出已是 sRGB gamma encoded（params.io.output_cctf_encoding=True）
-                # 只在 source 与 saving 不一致时才转换
-                src_cs = gui_state.simulation.output_color_space
-                src_enc = True
-                save_cs = gui_state.simulation.saving_color_space
-                save_enc = gui_state.simulation.saving_cctf_encoding
-                if src_cs != save_cs or src_enc != save_enc:
-                    result = colour.RGB_to_RGB(
-                        result, src_cs, save_cs,
-                        apply_cctf_decoding=src_enc,
-                        apply_cctf_encoding=save_enc,
-                    )
-
-                save_image_oiio(
-                    out_path,
-                    result,
-                    bit_depth=bit_depth,
-                    jpeg_quality=jpeg_quality,
-                    color_space=save_cs,
-                    cctf_encoding=save_enc,
-                )
-            except Exception as exc:
-                errors.append(f'{filename}: {exc}')
-
-        progress.setValue(len(files))
-
-        if errors:
-            QMessageBox.warning(
-                dialog_parent(self._viewer), '批量保存',
-                f'完成，但 {len(errors)} 个文件失败：\n' + '\n'.join(errors[:5]),
-            )
-            set_status(self._viewer, f'批量保存完成，{len(files) - len(errors)}/{len(files)} 成功')
-        else:
-            set_status(self._viewer, f'批量保存完成，共处理 {len(files)} 张图片 → {input_dir}')
-
     def setup_grain_preview_mouse_callback(self) -> None:
         """在 napari canvas 上安装 Option+点击 eventFilter。"""
         if self._grain_preview is not None:
@@ -734,7 +589,7 @@ class GuiController:
             return
 
         # 停掉 output 的入场动画/crossfade，避免数据正在被定时器改写
-        self._layers._stop_output_layer_animation(output_layer, restore_final=True)
+        self._layers.stop_output_animation(output_layer, restore_final=True)
 
         if self._compare_mode_active:
             # 当前正在显示原图 → 切回模拟图
@@ -768,14 +623,22 @@ class GuiController:
     # ── 中间结果缓存 ──────────────────────────────────────────────────────────
 
     def _make_expose_key(self, state) -> str:
-        """生成 expose 阶段的缓存 key，依赖：图像路径 + 胶片型号 + 曝光 + Halation + 前期柔光 + 镜头模糊"""
+        """生成 expose 阶段的缓存 key，依赖：图像路径 + 胶片型号 + 曝光 + 幅面 + 裁剪 + Halation + 前期柔光 + 镜头模糊"""
         s = state.simulation
         h = state.halation
+        i = state.input_image
         return '|'.join([
             str(self._current_input_path),
             s.film_stock,
             str(s.exposure_compensation_ev),
             str(s.auto_exposure),
+            # 胶片幅面影响 pixel_size_um → 影响所有空间效果（halation/diffusion）
+            str(s.film_format_mm),
+            # 裁剪/缩放影响最终图像形状 → 影响 pixel_size_um
+            str(i.upscale_factor),
+            str(i.crop),
+            str(i.crop_center),
+            str(i.crop_size),
             str(s.camera_lens_blur_um),
             str(s.camera_diffusion_filter_active),
             str(s.camera_diffusion_filter_family),
@@ -787,8 +650,8 @@ class GuiController:
             str(h.boost_ev), str(h.protect_ev), str(h.boost_range),
             str(h.halation_strength), str(h.halation_first_sigma_um),
             str(h.halation_n_bounces), str(h.halation_bounce_decay),
-            str(state.input_image.input_color_space),
-            str(state.input_image.apply_cctf_decoding),
+            str(i.input_color_space),
+            str(i.apply_cctf_decoding),
         ])
 
     def _make_develop_key(self, state, expose_key: str) -> str:
@@ -907,7 +770,7 @@ class GuiController:
 
     def apply_preset(self, name: str) -> None:
         """从预设目录加载指定预设并应用。"""
-        preset_path = Path.home() / '.spektrafilm' / 'presets' / f"{name}.json"
+        preset_path = presets_dir() / f"{name}.json"
         try:
             state = load_gui_state_from_path(preset_path)
         except Exception as exc:
@@ -919,7 +782,7 @@ class GuiController:
 
     def delete_preset(self, name: str) -> None:
         """删除指定预设文件。"""
-        preset_path = Path.home() / '.spektrafilm' / 'presets' / f"{name}.json"
+        preset_path = presets_dir() / f"{name}.json"
         try:
             if preset_path.exists():
                 preset_path.unlink()
@@ -945,9 +808,9 @@ class GuiController:
             return
         name = name.strip()
 
-        presets_dir = Path.home() / '.spektrafilm' / 'presets'
-        presets_dir.mkdir(parents=True, exist_ok=True)
-        preset_path = presets_dir / f"{name}.json"
+        target_dir = presets_dir()
+        target_dir.mkdir(parents=True, exist_ok=True)
+        preset_path = target_dir / f"{name}.json"
 
         state = collect_gui_state(widgets=self._widgets)
         save_gui_state_to_path(state, preset_path)
@@ -961,12 +824,12 @@ class GuiController:
         """从已保存的预设列表中选择并加载。"""
         from qtpy import QtWidgets as _QW
 
-        presets_dir = Path.home() / '.spektrafilm' / 'presets'
-        if not presets_dir.exists():
+        target_dir = presets_dir()
+        if not target_dir.exists():
             QMessageBox.information(dialog_parent(self._viewer), '加载预设', '还没有保存任何预设。')
             return
 
-        presets = sorted([p.stem for p in presets_dir.glob('*.json')])
+        presets = sorted([p.stem for p in target_dir.glob('*.json')])
         if not presets:
             QMessageBox.information(dialog_parent(self._viewer), '加载预设', '还没有保存任何预设。')
             return
@@ -1325,12 +1188,13 @@ class GuiController:
         self._active_simulation_reports_status = report_status
         self._set_simulation_controls_enabled(False)
         if report_status:
-            set_status(self._viewer, f'正在{mode_label.lower()}，图像越大耗时越长，请稍候...', timeout_ms=0)
+            _label_cn = {'Preview': '预览', 'Scan': '扫描'}.get(mode_label, mode_label)
+            set_status(self._viewer, f'正在{_label_cn}，图像越大耗时越长，请稍候...', timeout_ms=0)
         self._thread_pool.start(worker)
 
     def _on_simulation_finished(self, result: SimulationResult) -> None:
         report_status = self._active_simulation_reports_status
-        is_preview = result.mode_label == '预览'
+        is_preview = result.mode_label == 'Preview'
         self._active_simulation_worker = None
         self._active_simulation_label = None
         self._active_simulation_reports_status = True
@@ -1350,7 +1214,8 @@ class GuiController:
                 # 全分辨率扫描完成，提示用户
                 set_status(self._viewer, '全分辨率扫描完成。调其他参数会切回预览模式（颗粒仅在最终保存时生效）。')
             else:
-                set_status(self._viewer, f'{result.mode_label}完成。{result.status_message}')
+                _label_cn = {'Preview': '预览', 'Scan': '扫描'}.get(result.mode_label, result.mode_label)
+                set_status(self._viewer, f'{_label_cn}完成。{result.status_message}')
         self._replay_pending_auto_preview()
 
     def _on_simulation_failed(self, message: str) -> None:
@@ -1360,7 +1225,8 @@ class GuiController:
         self._active_simulation_reports_status = True
         self._set_simulation_controls_enabled(True)
         QMessageBox.critical(dialog_parent(self._viewer), '运行模拟', f'模拟失败.\n\n{message}')
-        set_status(self._viewer, f'{mode_label}失败')
+        _label_cn = {'Preview': '预览', 'Scan': '扫描'}.get(mode_label, mode_label)
+        set_status(self._viewer, f'{_label_cn}失败')
         self._replay_pending_auto_preview()
 
     def _set_simulation_controls_enabled(self, enabled: bool) -> None:
@@ -1373,31 +1239,3 @@ class GuiController:
             if callable(set_enabled):
                 set_enabled(enabled)
 
-    def _run_simulation(self, *, source_layer_name: str) -> None:
-        image_data = self._simulation_input_image(source_layer_name=source_layer_name)
-        if image_data is None:
-            QMessageBox.warning(dialog_parent(self._viewer), '运行模拟', '请先加载输入图像，再运行模拟。')
-            return
-
-        state = collect_gui_state(widgets=self._widgets)
-        self._sync_white_border(white_padding=state.display.white_padding)
-        params = self._configure_simulation_params(
-            build_params_from_state(state),
-            source_layer_name=source_layer_name,
-        )
-
-        image = np.double(image_data)
-        scan = self._process_image_with_runtime(image, params)
-        scan_display, display_status = self._prepare_output_display_image(
-            scan,
-            output_color_space=state.simulation.output_color_space,
-            use_display_transform=state.display.use_display_transform,
-        )
-        self._set_or_add_output_layer(
-            scan_display,
-            float_image=scan,
-            output_color_space=state.simulation.output_color_space,
-            output_cctf_encoding=True,
-            use_display_transform=state.display.use_display_transform,
-        )
-        set_status(self._viewer, display_status)

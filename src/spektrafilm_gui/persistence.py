@@ -64,6 +64,33 @@ def default_gui_state_path() -> Path:
     return Path.home() / ".spektrafilm" / DEFAULT_GUI_STATE_FILENAME
 
 
+def presets_dir() -> Path:
+    """预设文件存放目录。与 default_gui_state_path 同根，跨平台一致。
+
+    历史路径 ``~/.spektrafilm/presets/`` 与 default_gui_state 不同根，本函数
+    在首次返回新路径时自动迁移已有预设文件，避免用户预设丢失。
+    """
+    app_config_location = QStandardPaths.writableLocation(QStandardPaths.AppConfigLocation)
+    if app_config_location:
+        new_path = Path(app_config_location) / "presets"
+    else:
+        new_path = Path.home() / ".spektrafilm" / "presets"
+
+    # 一次性迁移：旧路径存在 + 新路径不存在 时复制
+    legacy_path = Path.home() / ".spektrafilm" / "presets"
+    if legacy_path != new_path and legacy_path.exists() and not new_path.exists():
+        try:
+            new_path.mkdir(parents=True, exist_ok=True)
+            for preset_file in legacy_path.glob("*.json"):
+                target = new_path / preset_file.name
+                if not target.exists():
+                    target.write_bytes(preset_file.read_bytes())
+        except OSError:
+            pass
+
+    return new_path
+
+
 def _deserialize_dataclass(cls: type[GuiStateType], data: dict[str, Any]) -> GuiStateType:
     if not isinstance(data, dict):
         raise ValueError(f"Expected an object for {cls.__name__}.")

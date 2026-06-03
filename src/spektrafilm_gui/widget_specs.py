@@ -71,12 +71,8 @@ GUI_WIDGET_SPECS = {
             tooltip="启用虚拟相机的自动曝光功能",
         ),
         "film_format_mm": WidgetSpec(
-            label="胶片幅面 mm",
-            tooltip="胶片长边尺寸（毫米），如 8、16、35、60、120",
-            min_value=8.0,
-            max_value=120.0,
-            step=1.0,
-            decimals=0,
+            label="胶片幅面",
+            tooltip="选择胶片画幅。决定每像素的物理尺寸（μm/像素），影响所有空间效果（halation、扩散、模糊）的实际比例。",
         ),
         "camera_lens_blur_um": WidgetSpec(
             label="镜头柔化",

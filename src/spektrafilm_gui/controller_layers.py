@@ -633,6 +633,15 @@ class ViewerLayerService:
         if restore_final:
             _set_layer_data(layer, np.array(handle.final_image, copy=True))
 
+    def stop_output_animation(
+        self,
+        layer: NapariImageLayer,
+        *,
+        restore_final: bool = True,
+    ) -> None:
+        """公开接口：跨边界使用时调这个，不要直接访问私有 _stop_*。"""
+        self._stop_output_layer_animation(layer, restore_final=restore_final)
+
     def output_layer_float_data(self) -> np.ndarray | None:
         output_layer = self.output_layer()
         if output_layer is None:

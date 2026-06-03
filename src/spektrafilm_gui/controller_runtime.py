@@ -65,31 +65,6 @@ def normalized_image_data(image: np.ndarray) -> np.ndarray:
     return image.astype(np.float32)
 
 
-def apply_white_padding(image_data: np.ndarray, padding_pixels: float) -> np.ndarray:
-    padding = max(0, int(round(padding_pixels)))
-    if padding == 0:
-        return np.asarray(image_data)
-
-    image = np.asarray(image_data)
-    if image.ndim < 2:
-        return image
-
-    fill_value = np.iinfo(image.dtype).max if np.issubdtype(image.dtype, np.integer) else 1.0
-    pad_width = [(padding, padding), (padding, padding)]
-    pad_width.extend((0, 0) for _ in range(image.ndim - 2))
-    return np.pad(image, pad_width, mode='constant', constant_values=fill_value)
-
-
-def padding_pixels_for_image(image_data: np.ndarray, padding_fraction: float) -> int:
-    image = np.asarray(image_data)
-    if image.ndim < 2:
-        return 0
-
-    padding_fraction = max(0.0, float(padding_fraction))
-    long_edge = max(int(image.shape[0]), int(image.shape[1]))
-    return int(np.floor(long_edge * padding_fraction))
-
-
 def display_profile_name(display_profile: object, *, imagecms_module: Any) -> str:
     try:
         profile_name = imagecms_module.getProfileName(display_profile)

@@ -273,6 +273,62 @@ class EnumEditor(QtWidgets.QComboBox):
             raise ValueError(f"{value!r} is not a valid option")
 
 
+class FilmFormatEditor(QtWidgets.QComboBox):
+    """胶片幅面下拉框：显示人类可读标签，对外暴露 float（毫米数）。
+
+    防止用户随意输入非法值（如把 120 胶卷型号当成 120mm 幅面），
+    导致下游 pipeline pixel_size_um 异常引发崩溃。
+
+    ``mm`` 值是胶片**长边**的物理尺寸，与 ResizingService 里的
+    ``pixel_size_um = film_format_mm * 1000 / max(image.shape[:2])`` 一致。
+    """
+
+    # (label, mm)；mm 是长边毫米数
+    _OPTIONS: tuple[tuple[str, float], ...] = (
+        ('8mm 电影 (8)', 8.0),
+        ('16mm 电影 (16)', 16.0),
+        ('Super 16 (24)', 24.0),
+        ('35mm 全画幅 (36)', 36.0),
+        ('中画幅 6×4.5 (60)', 60.0),
+        ('中画幅 6×6 (60)', 60.0),
+        ('中画幅 6×7 (70)', 70.0),
+        ('中画幅 6×9 (90)', 90.0),
+        ('大画幅 4×5 (127)', 127.0),
+    )
+
+    def __init__(self) -> None:
+        super().__init__()
+        for label, _mm in self._OPTIONS:
+            self.addItem(label)
+        # 默认 35mm（索引 3）
+        self.setCurrentIndex(3)
+
+    @property
+    def value(self) -> float:
+        idx = self.currentIndex()
+        if 0 <= idx < len(self._OPTIONS):
+            return float(self._OPTIONS[idx][1])
+        return 36.0
+
+    @value.setter
+    def value(self, value: float) -> None:
+        target = float(value)
+        # 120 是常见误用（胶卷型号被当成 mm 数），吸附到中画幅 6×9 (90mm) 而非
+        # 大画幅 4×5 (127mm)，更符合用户意图。
+        if 100.0 < target < 120.5:
+            target = 90.0
+        # 找最接近的合法选项
+        best_idx = min(
+            range(len(self._OPTIONS)),
+            key=lambda i: abs(self._OPTIONS[i][1] - target),
+        )
+        self.setCurrentIndex(best_idx)
+
+    def set_default_value(self, value: float) -> None:
+        """与 SliderFloatEditor 接口对齐，但下拉框不需要双击归零，空操作。"""
+        return
+
+
 class TupleEditor(QtWidgets.QWidget):
     def __init__(self, editors: list[QtWidgets.QWidget]):
         super().__init__()

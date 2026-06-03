@@ -30,9 +30,9 @@ from spektrafilm_gui.state import (
     SimulationState,
     SpecialState,
 )
-from spektrafilm_gui.persistence import load_dialog_dir, save_dialog_dir
+from spektrafilm_gui.persistence import load_dialog_dir, presets_dir, save_dialog_dir
 from spektrafilm_gui.theme_palette import SIZE_FOOTER_ITEM_SPACING
-from spektrafilm_gui.widget_editors import BoolEditor, EnumEditor, FloatEditor, FloatTupleEditor, IntEditor, IntTupleEditor, ProfileEnumEditor, SliderFloatEditor
+from spektrafilm_gui.widget_editors import BoolEditor, EnumEditor, FilmFormatEditor, FloatEditor, FloatTupleEditor, IntEditor, IntTupleEditor, ProfileEnumEditor, SliderFloatEditor
 from spektrafilm_gui.widget_primitives import CollapsibleSection, normalize_ui_text as _normalize_ui_text
 from spektrafilm_gui.widget_specs import GUI_SECTION_ENUMS, get_auxiliary_spec, get_button_spec, get_widget_spec
 from spektrafilm_gui.file_formats import RAW_EXTS
@@ -254,6 +254,9 @@ class DataclassSection(QWidget):
     def _build_editor(self, field_name: str, annotation: Any) -> QWidget:
         spec = get_widget_spec(self._section_name, field_name)
         enum_cls = self._enum_fields.get(field_name)
+        # 胶片幅面：用专用下拉编辑器，防止用户输入非法值（如把 120 胶卷当 120mm 幅面）
+        if self._section_name == 'simulation' and field_name == 'film_format_mm':
+            return FilmFormatEditor()
         if enum_cls is not None:
             if self._section_name == 'simulation' and field_name in {'film_stock', 'print_paper'}:
                 return ProfileEnumEditor(_enum_values(enum_cls))
@@ -1071,8 +1074,6 @@ class PresetPanelSection(QWidget):
     preset_save_requested = Signal()
     preset_delete_requested = Signal(str)  # 传预设名称
 
-    _PRESETS_DIR = Path.home() / '.spektrafilm' / 'presets'
-
     def __init__(self):
         super().__init__()
         self._build_ui()
@@ -1123,9 +1124,10 @@ class PresetPanelSection(QWidget):
     def refresh(self) -> None:
         """重新扫描预设目录，更新列表。"""
         self._list.clear()
-        if not self._PRESETS_DIR.exists():
+        target_dir = presets_dir()
+        if not target_dir.exists():
             return
-        for p in sorted(self._PRESETS_DIR.glob('*.json')):
+        for p in sorted(target_dir.glob('*.json')):
             self._list.addItem(p.stem)
 
     def _on_apply(self) -> None:
